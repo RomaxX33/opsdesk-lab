@@ -5,6 +5,8 @@
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://${RUNTIME_DB_USER}:${RUNTIME_DB_PASSWORD}@db:5432/${POSTGRES_DB}
+    volumes:
+      - .:/app
     ports:
       - "127.0.0.1:${APP_PORT:-8000}:8000"
     depends_on:

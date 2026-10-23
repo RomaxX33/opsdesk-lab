@@ -1,0 +1,18 @@
+﻿services:
+  opsdesk-test-db:
+    image: postgres:17-alpine
+    restart: "no"
+    environment:
+      POSTGRES_DB: opsdesk_test
+      POSTGRES_USER: opsdesk_test_admin
+      POSTGRES_PASSWORD: opsdesk-test-admin-local-only
+    volumes:
+      - ./tests/init-test-db.sql:/docker-entrypoint-initdb.d/10-create-runtime-role.sql:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
