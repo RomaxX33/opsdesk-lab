@@ -31,18 +31,27 @@ The application is published on `127.0.0.1:8000` by default. The database is not
 ## Repository structure
 
 ```text
-app/
-  __init__.py
-  main.py
-docs/
-  architecture.md
-.env
-.env.example
-.gitignore
-compose.yaml
-Dockerfile
-README.md
-requirements.txt
+opsdesk-lab/
+|-- app/
+|   |-- __init__.py
+|   `-- main.py
+|-- docs/
+|   `-- architecture.md
+|-- migrations/
+|   |-- 001_create_incidents.sql
+|   |-- 002_incidents_update_permissions.sql
+|   `-- 003_incidents_delete_permissions.sql
+|-- tests/
+|   |-- conftest.py
+|   |-- init-test-db.sql
+|   `-- test_incidents.py
+|-- .env.example
+|-- .gitignore
+|-- compose.test.yaml
+|-- compose.yaml
+|-- Dockerfile
+|-- README.md
+`-- requirements.txt
 ```
 
 The local `.env` file contains environment-specific configuration and must not be committed to Git. The `.env.example` file documents the required configuration variables.
@@ -384,6 +393,47 @@ A successful request returns `200 OK` and the incident object.
 - `422 Unprocessable Entity`: the path parameter is not a valid UUID.
 - `503 Service Unavailable`: the database connection is unavailable.
 - `500 Internal Server Error`: another database operation fails.
+
+### Update an incident
+
+Endpoint: PATCH /incidents/{incident_id}
+
+Updates one or more fields of an existing incident. The incident ID must be a valid UUID.
+
+Supported fields:
+- title: 5 to 160 characters after trimming surrounding whitespace.
+- description: 10 to 5000 characters after trimming surrounding whitespace.
+- status: open, in_progress, waiting, resolved, or closed.
+- priority: low, medium, high, or critical.
+
+At least one field must be provided. Fields cannot be null. Unknown fields and invalid values are rejected.
+
+Status transitions:
+- open, in_progress, and waiting can transition to any supported status.
+- resolved can transition to open, in_progress, resolved, or closed.
+- closed can only remain closed.
+
+A successful update returns HTTP 200 and the updated incident as JSON.
+
+Error responses:
+- 404: the incident does not exist.
+- 422: invalid UUID, invalid fields, empty update, null field, or disallowed status transition.
+- 503: database temporarily unavailable.
+- 500: unexpected database error.
+
+### Delete an incident
+
+Endpoint: DELETE /incidents/{incident_id}
+
+Deletes an existing incident. The incident ID must be a valid UUID.
+
+A successful deletion returns HTTP 204 with an empty response body.
+
+Error responses:
+- 404: the incident does not exist.
+- 422: invalid UUID.
+- 503: database temporarily unavailable.
+- 500: unexpected database error.
 
 ### Manual verification results
 
