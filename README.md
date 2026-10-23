@@ -421,6 +421,19 @@ Error responses:
 - 503: database temporarily unavailable.
 - 500: unexpected database error.
 
+
+Example request:
+
+    PATCH /incidents/d6ac9e18-c47f-46d6-8a72-fa10457978c0
+    Content-Type: application/json
+
+    {
+      "status": "in_progress",
+      "priority": "high"
+    }
+
+Example successful response: 200 OK, with the updated incident as a JSON object.
+
 ### Delete an incident
 
 Endpoint: DELETE /incidents/{incident_id}
@@ -434,6 +447,11 @@ Error responses:
 - 422: invalid UUID.
 - 503: database temporarily unavailable.
 - 500: unexpected database error.
+
+
+Example request:
+
+    DELETE /incidents/d6ac9e18-c47f-46d6-8a72-fa10457978c0
 
 ### Manual verification results
 
