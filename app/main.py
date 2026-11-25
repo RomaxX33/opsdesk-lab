@@ -275,11 +275,11 @@ class IncidentUpdate(BaseModel):
 )
 def update_incident(incident_id: UUID, payload: IncidentUpdate):
     allowed_transitions = {
-        "open": {"open", "in_progress", "waiting", "resolved", "closed"},
-        "in_progress": {"open", "in_progress", "waiting", "resolved", "closed"},
-        "waiting": {"open", "in_progress", "waiting", "resolved", "closed"},
-        "resolved": {"open", "in_progress", "resolved", "closed"},
-        "closed": {"closed"},
+        "open": {"open", "in_progress", "waiting", "resolved"},
+        "in_progress": {"in_progress", "waiting", "resolved"},
+        "waiting": {"waiting", "in_progress", "resolved"},
+        "resolved": {"resolved", "closed", "open"},
+        "closed": {"closed", "open"},
     }
 
     updates = payload.model_dump(exclude_unset=True)

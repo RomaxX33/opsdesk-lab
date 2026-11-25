@@ -125,3 +125,128 @@ def test_error_handling(client):
     missing_id = str(uuid.uuid4())
     missing_response = client.get(f"/incidents/{missing_id}")
     assert missing_response.status_code == 404
+
+
+def _create_incident_for_transition_tests(client):
+    response = client.post(
+        "/incidents",
+        json={
+            "title": "Incidencia para transiciones",
+            "description": "Descripción válida para probar los cambios de estado",
+            "priority": "medium",
+        },
+    )
+
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+def _prepare_incident_in_status(client, incident_id, target_status):
+    transition_paths = {
+        "open": [],
+        "in_progress": ["in_progress"],
+        "waiting": ["waiting"],
+        "resolved": ["resolved"],
+        "closed": ["resolved", "closed"],
+    }
+
+    for next_status in transition_paths[target_status]:
+        response = client.patch(
+            f"/incidents/{incident_id}",
+            json={"status": next_status},
+        )
+        assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("source_status", "target_status"),
+    [
+        ("open", "in_progress"),
+        ("open", "waiting"),
+        ("open", "resolved"),
+        ("in_progress", "waiting"),
+        ("in_progress", "resolved"),
+        ("waiting", "in_progress"),
+        ("waiting", "resolved"),
+        ("resolved", "closed"),
+        ("resolved", "open"),
+        ("closed", "open"),
+    ],
+)
+def test_allowed_status_transitions(client, source_status, target_status):
+    incident_id = _create_incident_for_transition_tests(client)
+    _prepare_incident_in_status(client, incident_id, source_status)
+
+    response = client.patch(
+        f"/incidents/{incident_id}",
+        json={"status": target_status},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == target_status
+
+
+@pytest.mark.parametrize(
+    ("source_status", "target_status"),
+    [
+        ("open", "closed"),
+        ("in_progress", "open"),
+        ("in_progress", "closed"),
+        ("waiting", "open"),
+        ("waiting", "closed"),
+        ("resolved", "in_progress"),
+        ("resolved", "waiting"),
+        ("closed", "in_progress"),
+        ("closed", "waiting"),
+        ("closed", "resolved"),
+    ],
+)
+def test_rejected_status_transitions(client, source_status, target_status):
+    incident_id = _create_incident_for_transition_tests(client)
+    _prepare_incident_in_status(client, incident_id, source_status)
+
+    response = client.patch(
+        f"/incidents/{incident_id}",
+        json={"status": target_status},
+    )
+
+    assert response.status_code == 422
+
+    current = client.get(f"/incidents/{incident_id}")
+    assert current.status_code == 200
+    assert current.json()["status"] == source_status
+
+
+@pytest.mark.parametrize(
+    "current_status",
+    ["open", "in_progress", "waiting", "resolved", "closed"],
+)
+def test_update_fields_without_changing_status(client, current_status):
+    incident_id = _create_incident_for_transition_tests(client)
+    _prepare_incident_in_status(client, incident_id, current_status)
+
+    response = client.patch(
+        f"/incidents/{incident_id}",
+        json={"priority": "critical"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == current_status
+    assert response.json()["priority"] == "critical"
+
+
+@pytest.mark.parametrize(
+    "current_status",
+    ["open", "in_progress", "waiting", "resolved", "closed"],
+)
+def test_same_status_transition_is_allowed(client, current_status):
+    incident_id = _create_incident_for_transition_tests(client)
+    _prepare_incident_in_status(client, incident_id, current_status)
+
+    response = client.patch(
+        f"/incidents/{incident_id}",
+        json={"status": current_status},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == current_status

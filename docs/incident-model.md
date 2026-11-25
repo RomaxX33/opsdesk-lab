@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-Define the initial incident data model and business rules before implementing database migrations or CRUD endpoints.
+Define the incident data model, validation rules and business logic implemented by OpsDesk Lab. This document serves as the reference for incident-related application behavior and database constraints.
 
 ## 2. Scope
 
@@ -69,11 +69,10 @@ Database constraints must reject unknown priority values.
 
 - PostgreSQL is the source of truth for incident records.
 - FastAPI exposes the HTTP API.
-- The existing Psycopg dependency is retained for the initial implementation.
-- No ORM or migration dependency is added during this design task.
-- Schema changes must be introduced through reviewed, version-controlled migrations.
+- The existing Psycopg dependency is retained; no ORM is used.
+- Database schema changes are managed through reviewed, version-controlled SQL migrations.
 - The application uses the dedicated `opsdesk_runtime` login role, which has no superuser, database/role creation, replication or RLS-bypass privileges. It has `CONNECT` on `opsdesk` and `USAGE` on `public`, but no `CREATE` privilege.
-- No incident table or migration has been created yet. The initial `opsdesk_app` role remains the local cluster bootstrap superuser; the application uses `opsdesk_runtime` at runtime. Schema migrations must use a controlled administrative/migration role, followed by explicit runtime table grants.
+- The initial `opsdesk_app` role remains the local cluster bootstrap superuser. Schema migrations use a controlled administrative/migration role, followed by explicit runtime table grants.
 
 ## 8. Deferred decisions
 
@@ -86,4 +85,4 @@ Incident assignment, users, comments, attachments, audit history, pagination str
 - Invalid status transitions are specified.
 - Validation and timestamp invariants are documented.
 - Existing dependencies and configuration have been reviewed.
-- This document defines the intended incident model; it does not implement the schema or migration. Local role and privilege changes are managed separately.
+- The incident schema is implemented through version-controlled SQL migrations. Local role and privilege changes are managed separately.

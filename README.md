@@ -36,7 +36,8 @@ opsdesk-lab/
 |   |-- __init__.py
 |   `-- main.py
 |-- docs/
-|   `-- architecture.md
+|   |-- architecture.md
+|   `-- incident-model.md
 |-- migrations/
 |   |-- 001_create_incidents.sql
 |   |-- 002_incidents_update_permissions.sql
@@ -92,8 +93,101 @@ Edit `.env` and configure these variables:
 | `POSTGRES_DB` | PostgreSQL database name. |
 | `POSTGRES_USER` | PostgreSQL application database user. |
 | `POSTGRES_PASSWORD` | Password for the PostgreSQL user. |
+| `RUNTIME_DB_USER` | Dedicated PostgreSQL role used by the application at runtime. |
+| `RUNTIME_DB_PASSWORD` | Password for the runtime PostgreSQL role. |
+
+`RUNTIME_DB_USER` must remain set to `opsdesk_runtime`, as the database migrations grant permissions to that specific role. Changing it requires updating the role creation instructions and migration files accordingly.
 
 Use appropriate local credentials. Never commit `.env`, publish passwords, or include real credentials in documentation or example configuration files.
+
+## Initialize the development database (first setup only)
+
+The application connects to PostgreSQL using the restricted `opsdesk_runtime` role. This role must be created before starting the application for the first time.
+
+Start only the development database:
+
+```powershell
+docker compose up -d db
+```
+
+Open an administrative PostgreSQL session:
+
+```powershell
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+Run the following SQL statements in the PostgreSQL prompt:
+
+```sql
+CREATE ROLE opsdesk_runtime
+    LOGIN
+    NOSUPERUSER
+    NOCREATEDB
+    NOCREATEROLE
+    NOREPLICATION
+    NOBYPASSRLS;
+
+SELECT format(
+    'GRANT CONNECT ON DATABASE %I TO opsdesk_runtime',
+    current_database()
+) \gexec
+
+GRANT USAGE ON SCHEMA public TO opsdesk_runtime;
+```
+
+Set the runtime role password using the interactive PostgreSQL command:
+
+```text
+\password opsdesk_runtime
+```
+
+Enter the same password configured as `RUNTIME_DB_PASSWORD` in `.env`.
+
+Exit PostgreSQL:
+
+```text
+\q
+```
+
+Apply the database migrations in numerical order using the initial administrative PostgreSQL role. These commands are for a fresh development database only.
+
+Run the following commands from the project root in PowerShell:
+
+```powershell
+$migrations = @(
+    "001_create_incidents.sql",
+    "002_incidents_update_permissions.sql",
+    "003_incidents_delete_permissions.sql"
+)
+
+foreach ($migration in $migrations) {
+    $source = Join-Path $PWD "migrations\$migration"
+    $destination = "/tmp/$migration"
+
+    if (-not (Test-Path $source)) {
+        throw "Migration not found: $source"
+    }
+
+    docker compose cp $source "db:$destination"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to copy $migration. Stopping."
+    }
+
+    docker compose exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$1"' sh $destination
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to apply $migration. Stopping."
+    }
+}
+```
+
+The application can now be started:
+
+```powershell
+docker compose up -d --build
+```
+
+Do not reapply these migrations to an already initialized database.
 
 ## Start the application
 
@@ -177,9 +271,11 @@ FastAPI provides interactive API documentation through Swagger UI.
 
 The integration tests use a dedicated PostgreSQL service (`opsdesk-test-db`) and database (`opsdesk_test`). A test guard blocks execution unless `DATABASE_URL` points to that host and database.
 
-The suite currently contains 12 test cases covering incident creation, retrieval, listing, updating, deletion, input validation, whitespace normalization, and selected HTTP errors. Test-created rows are cleaned up after each test. This cleanup is not transaction rollback isolation.
+The suite currently contains 42 test cases covering incident creation, retrieval, listing, updating, deletion, input validation, whitespace normalization, HTTP error handling, allowed and rejected transitions, including same-status updates, and field updates without changing the incident status.
 
-### Run the tests
+Test-created rows are cleaned up after each test. This cleanup is not transaction rollback isolation.
+
+### Initialize the test database (first setup only)
 
 Run these commands from the project root in PowerShell. Apply the migrations only when setting up a fresh test database or after intentionally recreating the test database.
 
@@ -222,6 +318,18 @@ docker compose @composeFiles exec -T `
 ```
 
 The test database is separate from the development database and has no named persistent volume. Never point the test suite at the development `db` service.
+
+### Run the tests (normal execution)
+
+Once the test database has been initialized, run only the test command. Do not reapply migrations on an already initialized test database.
+
+```powershell
+$composeFiles = @("-f", ".\compose.yaml", "-f", ".\compose.test.yaml")
+
+docker compose @composeFiles exec -T `
+    -e DATABASE_URL=postgresql://opsdesk_runtime:opsdesk-test-runtime-local-only@opsdesk-test-db:5432/opsdesk_test `
+    app python -m pytest -v /app/tests
+```
 
 ## Logs and troubleshooting
 
@@ -317,7 +425,8 @@ A persistent volume is not a backup. Important data should also be protected wit
 - Application health check.
 - Named volume for PostgreSQL persistence.
 - Local container recreation test confirming data persistence.
-- Automated integration tests against an isolated PostgreSQL test database (12 test cases passed in the latest run).
+- Automated integration tests against an isolated PostgreSQL test database (42 test cases passed in the latest run).
+- Incident CRUD API with input validation and controlled status transitions.
 
 **Planned:**
 - Backup and recovery procedures.
@@ -327,7 +436,7 @@ This project is being developed incrementally to demonstrate practical IT operat
 
 ## Incidents API
 
-The incidents API supports creating, listing, and retrieving incidents. All endpoints return JSON.
+The incidents API supports creating, listing, retrieving, updating, and deleting incidents. All successful responses return JSON, except successful deletion requests, which return an empty response body with HTTP 204.
 
 ### Incident model
 
@@ -409,9 +518,17 @@ Supported fields:
 At least one field must be provided. Fields cannot be null. Unknown fields and invalid values are rejected.
 
 Status transitions:
-- open, in_progress, and waiting can transition to any supported status.
-- resolved can transition to open, in_progress, resolved, or closed.
-- closed can only remain closed.
+- `open` can transition to `in_progress`, `waiting`, or `resolved`.
+- `in_progress` can transition to `waiting` or `resolved`.
+- `waiting` can transition to `in_progress` or `resolved`.
+- `resolved` can transition to `closed` or `open`.
+- `closed` can transition to `open`.
+
+Every status may also remain unchanged. Explicitly setting the current status is accepted.
+
+All other status transitions are rejected with HTTP 422 Unprocessable Entity.
+
+A PATCH request that updates other fields without specifying a new status preserves the current status. This allows title, description, and priority updates regardless of the incident's current status.
 
 A successful update returns HTTP 200 and the updated incident as JSON.
 
